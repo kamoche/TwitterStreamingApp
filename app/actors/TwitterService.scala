@@ -2,15 +2,29 @@ package actors
 
 import javax.inject.Inject
 import play.api.Configuration
-import play.api.libs.oauth
 import play.api.libs.oauth.{ConsumerKey, OAuthCalculator, RequestToken}
 import play.api.libs.ws.{WSClient, WSResponse}
-import play.api.mvc.ResponseHeader
 
 import scala.concurrent.Future
 
+trait TwitterCredentials{
+  def config: Configuration
+  def credentials : Option[(ConsumerKey, RequestToken)] = Some((
+    ConsumerKey(config.get[String]("twitter.apiKey"),config.get[String]("twitter.apiSecret"))),
+    RequestToken(config.get[String]("twitter.token"),config.get[String]("twitter.tokenSecret")))
+}
+
 trait TwitterService {
-  def credentials
+  def config1: Configuration
+  def credentials: Option[(ConsumerKey, RequestToken)]
+  def credentials1: Option[(ConsumerKey, RequestToken)] = for {
+    apiKey <- config1.getString("twitter.apiKey")
+    apiSecret <- config1.getString("twitter.apiSecret")
+    token <- config1.getString("twitter.token")
+    tokenSecret <- config1.getString("twitter.tokenSecret")
+  } yield (ConsumerKey(apiKey, apiSecret), RequestToken(token, tokenSecret))
+
+
   def fetchRetweets(tweetId: BigInt): Future[WSResponse]
 }
 
@@ -33,4 +47,6 @@ class TwitterServiceImpl @Inject()(wc: WSClient, config: Configuration) extends 
   }.getOrElse{
     Future.failed(new RuntimeException("You did not correctly configure twitter credentials"))
   }
+
+  override def config1: Configuration = config
 }

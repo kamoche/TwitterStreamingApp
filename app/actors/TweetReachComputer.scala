@@ -1,9 +1,9 @@
 package actors
 
 import actors.Storage.{ReachStored, StoreReach}
-import actors.TweetReachComputer.{ComputeReach, TweetReach}
+import actors.TweetReachComputer.{ComputeReach, TweetReach, TweetReachCouldNotBeComputed}
 import actors.UserFollowersCounter._
-import akka.actor.{Actor, ActorLogging, ActorRef, Props}
+import akka.actor.{Actor, ActorLogging, ActorRef, Cancellable, Props}
 import javax.inject.Inject
 import play.api.Configuration
 import play.api.libs.json.JsArray
@@ -11,15 +11,26 @@ import play.api.libs.oauth.{ConsumerKey, OAuthCalculator, RequestToken}
 import akka.pattern.pipe
 import play.api.libs.ws.WSClient
 
+import scala.concurrent.duration._
 import scala.concurrent.Future
 import scala.util.control.NonFatal
-//148
 
-class TweetReachComputer @Inject()(wc: WSClient, config: Configuration, userFollowersCounter: ActorRef, storage: ActorRef) extends Actor with ActorLogging {
+class TweetReachComputer @Inject()(wc: WSClient, configuration: Configuration, userFollowersCounter: ActorRef, storage: ActorRef) extends Actor
+  with ActorLogging with TwitterCredentials {
 
   implicit val executionContext = context.dispatcher
 
+  override def config: Configuration = configuration
+
+
   var followersCountsByRetweet = Map.empty[FetchedRetweets, List[FollowerCount]]
+
+  val retryUnacknowledged: Cancellable = context.system.scheduler.schedule(1.second, 20.seconds,self, ResendUnacknowledged)
+
+  override def postStop(): Unit = {
+    retryUnacknowledged.cancel()
+    super.postStop()
+  }
 
   override def receive: Receive = {
 
@@ -44,25 +55,40 @@ class TweetReachComputer @Inject()(wc: WSClient, config: Configuration, userFoll
         updateFollowersCount(tweetId, fetchedRetweets, count)
       }
 
+    case FollowerCountUnavailable(tweetId, user) =>
+      followersCountsByRetweet.keys.find(_.tweetId == tweetId).foreach { fetchedRetweets =>
+        fetchedRetweets.client ! TweetReachCouldNotBeComputed
+      }
+
     case ReachStored(tweetId) =>
       followersCountsByRetweet.keys.find(_.tweetId == tweetId).foreach {
         key => followersCountsByRetweet = followersCountsByRetweet.filterNot(_._1 == key)
       }
 
+    case ResendUnacknowledged =>
+      val unacknowledged = followersCountsByRetweet.filterNot{
+        case (retweet,counts) =>
+          retweet.retweeters.size != counts
+
+      }
+
+      unacknowledged.foreach{
+        case (retweet, counts) =>
+          val score = counts.map(_.followersCount).sum
+          storage ! StoreReach(retweet.tweetId, score)
+      }
+
+    case RetweetFetchingFailed(tweetId, cause, client) =>
+      log.error(cause, "Could not fetch retweets for tweet {}", tweetId)
+
 
   }
 
-
+  case object ResendUnacknowledged
   case class FetchedRetweets(tweetId: BigInt, retweeters: List[BigInt], client: ActorRef)
 
   case class RetweetFetchingFailed(tweetId: BigInt, cause: Throwable, client: ActorRef)
 
- def credentials: Option[(ConsumerKey,RequestToken)]= for {
-    apiKey <- config get[String] "twitter.apiKey"
-    apiSecret <- config get[String] "twitter.apiSecret"
-    token <- config get[String] "twitter.token"
-    tokenSecret <- config get[String] "twitter.tokenSecret"
-  } yield (ConsumerKey(apiKey, apiSecret), RequestToken(token, tokenSecret))
 
   def fetchRetweets(tweetId: BigInt, client: ActorRef): Future[FetchedRetweets] =
     credentials.map {
@@ -99,6 +125,7 @@ class TweetReachComputer @Inject()(wc: WSClient, config: Configuration, userFoll
     }
 
   }
+
 }
 
 object TweetReachComputer {
@@ -110,6 +137,8 @@ object TweetReachComputer {
   case class ComputeReach(tweetId: BigInt)
 
   case class TweetReach(tweetId: BigInt, score: Int)
+
+  case object TweetReachCouldNotBeComputed
 
 }
 
