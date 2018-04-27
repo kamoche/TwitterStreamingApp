@@ -1,75 +1,34 @@
 package controllers
 
+import actors.StatisticsProvider
+import actors.TweetReachComputer.{ComputeReach, TweetReach, TweetReachCouldNotBeComputed}
+import akka.actor.ActorSystem
+import akka.util.Timeout
 import javax.inject.Inject
-import play.api.Configuration
-import play.api.libs.oauth._
-import play.api.libs.ws
-import play.api.libs.ws._
-import play.api.mvc._
-import play.libs.oauth.OAuth.ServiceInfo
+import play.api.mvc.{AbstractController, ControllerComponents}
+import akka.pattern.ask
+import execcontexts.CustomerExecutors
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.duration._
 
-object routes1 {
-  object Application {
-    val authenticate = Call("GET", "authenticate")
-    val index = Call("GET", "index")
-  }
-}
+class TwitterController @Inject()(system: ActorSystem, customerExecutors: CustomerExecutors, cc: ControllerComponents) extends AbstractController(cc) {
 
-class TwitterController @Inject()(wc: WSClient, configuration: Configuration, cc: ControllerComponents)(implicit exec: ExecutionContext) extends AbstractController(cc) {
+  implicit val ec = customerExecutors.expensiveCpuOperations
 
-  val KEY = ConsumerKey(configuration.get[String]("twitter.apiKey"), configuration[String]("twitter.apiSecret"))
+  lazy val statisticsProvider = system.actorSelection("akka://application/user/statisticsProvider")
 
-  val oauth = OAuth(ServiceInfo(
-    "https://api.twitter.com/oauth/request_token",
-    " https://api.twitter.com/oauth/access_token",
-    " https://api.twitter.com/oauth/authorize",
-    KEY
-  ), true)
+  def computeReach(tweetId: String) = Action.async {
 
-
-  def sessionTokenPair(implicit request: RequestHeader): Option[RequestToken] = {
-    for {
-      token <- request.session.get("token")
-      secret <- request.session.get("secret")
-    } yield
-      RequestToken(token, secret)
-  }
-
-  def authenticate = Action { request: Request[AnyContent] =>
-    request.getQueryString("oauth_verifier").map { verifier =>
-      val tokenPair = sessionTokenPair(request).get
-      // We got the verifier; now get the access token, store it and back to index
-      oauth.retrieveAccessToken(tokenPair, verifier) match {
-        case Right(t) => {
-          // We received the authorized tokens in the OAuth object - store it before we proceed
-          Redirect(routes1.Application.index).withSession("token" -> t.token, "secret" -> t.secret)
-        }
-        case Left(e) => throw e
-      }
-    }.getOrElse(
-      oauth.retrieveRequestToken("https://localhost:9000/auth") match {
-        case Right(t) => {
-          // We received the unauthorized tokens in the OAuth object - store it before we proceed
-          Redirect(oauth.redirectUrl(t.token)).withSession("token" -> t.token, "secret" -> t.secret)
-        }
-        case Left(e) => throw e
-      })
-  }
-
-  def timeline = Action.async { implicit request: Request[AnyContent] =>
-    sessionTokenPair match {
-      case Some(credentials) => {
-        wc.url("https://api.twitter.com/1.1/statuses/home_timeline.json")
-          .sign(OAuthCalculator(KEY, credentials))
-          .get
-          .map(result => Ok(result.json))
-      }
-      case _ => Future.successful(Redirect(routes1.Application.authenticate))
+    implicit val timeout = Timeout(10.minutes)
+    val eventuallyReach = statisticsProvider ? ComputeReach(BigInt(tweetId))
+    eventuallyReach.map {
+      case tr: TweetReach =>
+        Ok(tr.score.toString)
+      case StatisticsProvider.ServiceUnavailable =>
+        ServiceUnavailable("Sorry")
+      case TweetReachCouldNotBeComputed =>
+        ServiceUnavailable("Sorry")
     }
   }
 
 }
-
-

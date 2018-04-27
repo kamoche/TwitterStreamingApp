@@ -37,6 +37,7 @@
   <logger name="actors" level="DEBUG"/>
 
   <logger name="reactivemongo" level="WARN" />
+  <logger name="reactivemongo-akka" level="WARN" />
 
   <root level="WARN">
     <appender-ref ref="ASYNCFILE" />

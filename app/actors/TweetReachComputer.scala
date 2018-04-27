@@ -7,7 +7,7 @@ import akka.actor.{Actor, ActorLogging, ActorRef, Cancellable, Props}
 import javax.inject.Inject
 import play.api.Configuration
 import play.api.libs.json.JsArray
-import play.api.libs.oauth.{ConsumerKey, OAuthCalculator, RequestToken}
+import play.api.libs.oauth.{ OAuthCalculator}
 import akka.pattern.pipe
 import play.api.libs.ws.WSClient
 
@@ -68,7 +68,7 @@ class TweetReachComputer @Inject()(wc: WSClient, configuration: Configuration, u
     case ResendUnacknowledged =>
       val unacknowledged = followersCountsByRetweet.filterNot{
         case (retweet,counts) =>
-          retweet.retweeters.size != counts
+          retweet.retweeters.size != counts.size
 
       }
 
@@ -102,7 +102,7 @@ class TweetReachComputer @Inject()(wc: WSClient, configuration: Configuration, u
             val ids = (response.json \ "ids").as[JsArray].value.map(v => BigInt(v.as[String])).toList
             FetchedRetweets(tweetId, ids, client)
           } else {
-            throw new RuntimeException("Could not retrive details for twee")
+            throw new RuntimeException(s"Could not retrive details for Tweet $tweetId with response code: ${response.status}, error: ${response}")
           }
     }
     }.getOrElse{

@@ -6,6 +6,7 @@ import actors.UserFollowersCounter.{TwitterRateLimitReached, UserFollowersCounte
 import akka.actor.SupervisorStrategy.{Escalate, Restart}
 import akka.actor.{Actor, ActorLogging, ActorRef, OneForOneStrategy, Props, SupervisorStrategy, Terminated}
 import javax.inject.Inject
+import models.StoredReachBsonRepo
 import org.joda.time.{DateTime, Interval}
 import play.api.Configuration
 import play.api.libs.ws.WSClient
@@ -13,7 +14,7 @@ import reactivemongo.core.errors.ConnectionException
 
 import scala.concurrent.duration._
 
-class StatisticsProvider @Inject()(config:Configuration, wSClient: WSClient) extends Actor with ActorLogging {
+class StatisticsProvider @Inject()(storedReachBsonRepo: StoredReachBsonRepo,config:Configuration, wSClient: WSClient) extends Actor with ActorLogging {
 
   import StatisticsProvider._
 
@@ -25,9 +26,9 @@ class StatisticsProvider @Inject()(config:Configuration, wSClient: WSClient) ext
 
   override def preStart(): Unit = {
     log.info("Starting StatisticsProvider")
-    followersCounter = context.actorOf(Props[UserFollowersCounter], name = "userFollowersCounter")
-    storage = context.actorOf(Props[Storage], name = "storage")
-    reachComputer = context.actorOf(TweetReachComputer.props(wSClient,config ,followersCounter, storage), name = "tweetReachComputer")
+    followersCounter = context.actorOf(UserFollowersCounter.props(wSClient,config), UserFollowersCounter.name)
+    storage = context.actorOf(Storage.props(storedReachBsonRepo),Storage.name)
+    reachComputer = context.actorOf(TweetReachComputer.props(wSClient,config ,followersCounter, storage), TweetReachComputer.name)
 
     context.watch(storage)
   }
@@ -62,7 +63,7 @@ class StatisticsProvider @Inject()(config:Configuration, wSClient: WSClient) ext
     case ComputeReach(_) =>
       sender() ! ServiceUnavailable
     case ReviveStorage =>
-      storage = context.actorOf(Storage.props(), Storage.name)
+      storage = context.actorOf(Storage.props(storedReachBsonRepo), Storage.name)
       context.unbecome()
   }
 
@@ -87,7 +88,8 @@ class StatisticsProvider @Inject()(config:Configuration, wSClient: WSClient) ext
 }
 
 object StatisticsProvider {
-  def props(config:Configuration, wSClient: WSClient): Props = Props(new StatisticsProvider(config,wSClient)).withDispatcher("control-aware-dispatcher")
+
+  def props(storedReachBsonRepo: StoredReachBsonRepo,config:Configuration, wSClient: WSClient): Props = Props(new StatisticsProvider(storedReachBsonRepo,config,wSClient)).withDispatcher("control-aware-dispatcher")
 
   val name = "statisticProvider"
 

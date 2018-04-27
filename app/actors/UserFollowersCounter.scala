@@ -91,7 +91,7 @@ class UserFollowersCounter @Inject()(wSClient: WSClient, configuration: Configur
 }
 
 object UserFollowersCounter {
-  def props():Props = Props[UserFollowersCounter]
+  def props(wSClient: WSClient, configuration: Configuration):Props = Props(new UserFollowersCounter(wSClient,configuration))
   val name = "userFollowersCounter"
 
   case class FollowerCount(tweetId: BigInt,user: BigInt, followersCount: Int)
