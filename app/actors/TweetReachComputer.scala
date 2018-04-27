@@ -80,6 +80,7 @@ class TweetReachComputer @Inject()(wc: WSClient, configuration: Configuration, u
 
     case RetweetFetchingFailed(tweetId, cause, client) =>
       log.error(cause, "Could not fetch retweets for tweet {}", tweetId)
+      client ! TweetReachCouldNotBeComputed
 
 
   }
@@ -96,6 +97,7 @@ class TweetReachComputer @Inject()(wc: WSClient, configuration: Configuration, u
         wc.url("https://api.twitter.com/1.1/statuses/retweeters/ids.json")
           .sign(OAuthCalculator(consumerKey,requestToken))
           .addQueryStringParameters("id" -> tweetId.toString)
+          .addQueryStringParameters("count" -> "100")
           .addQueryStringParameters("stringify_ids" -> "true")
           .get().map { response =>
           if (response.status == 200) {

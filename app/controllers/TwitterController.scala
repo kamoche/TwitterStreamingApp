@@ -28,6 +28,8 @@ class TwitterController @Inject()(system: ActorSystem, customerExecutors: Custom
         ServiceUnavailable("Sorry")
       case TweetReachCouldNotBeComputed =>
         ServiceUnavailable("Sorry")
+      case _ =>
+        NotImplemented("other issues, contact admin")
     }
   }
 
